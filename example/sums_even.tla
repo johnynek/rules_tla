@@ -3,7 +3,7 @@
 
 EXTENDS Naturals, TLAPS
 
-Even1(x) == x % 2 = 0
+Even(x) == x % 2 = 0
 Odd(x) == x % 2 = 1
 
 \* Z3 can solve it in a single step

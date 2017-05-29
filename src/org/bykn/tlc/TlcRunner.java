@@ -1,15 +1,18 @@
 package org.bykn.tlc;
 
 import java.io.File;
-import java.nio.file.Paths;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.rmi.RemoteException;
 import java.util.Arrays;
 import tlc2.TLC;
 import tlc2.TLCGlobals;
 import tlc2.tool.ModelChecker;
+import tlc2.tool.Simulator;
 import tlc2.tool.fp.FPSetConfiguration;
 import tlc2.tool.fp.MSBDiskFPSet;
+import tlc2.util.FP64;
+import tlc2.util.RandomGenerator;
 import util.FileUtil;
 import util.FilenameToStream;
 import util.SimpleFilenameToStream;
@@ -48,6 +51,8 @@ class TlcRunner {
 
     @Override
     public File resolve(String filename, boolean isModule) {
+      //System.out.println(filename);
+      //System.out.println(_root);
       File test0 = new File(_root, filename);
       File test1 = new File(filename);
       if (test0.exists()) {
@@ -79,37 +84,102 @@ class TlcRunner {
     }
   }
 
+  private static FilenameToStream getResolver(File cwd, String mainFile) {
+    File root = new File(cwd, mainFile).getParentFile();
+    FilenameToStream resolver0 = new RelativeF2S(root, new SimpleFilenameToStream());
+    FilenameToStream resolver = new RelativeF2S(cwd, resolver0);
+
+    return resolver;
+  }
+
+  private static void modelCheck(File cwd, String mainFile, String conf) throws Throwable {
+    FPSetConfiguration fpSetConfiguration = new FPSetConfiguration(0.25d,
+      SanePathingMultiFPSet.class.getName());
+    TLCGlobals.metaDir = System.getProperty("java.io.tmpdir");
+
+    FilenameToStream resolver = getResolver(cwd, mainFile);
+
+    int len = mainFile.length();
+    if (mainFile.startsWith(".tla", len - 4)) {
+      mainFile = mainFile.substring(0, len - 4);
+    }
+    len = conf.length();
+    if (conf.startsWith(".cfg", len - 4)) {
+      conf = conf.substring(0, len - 4);
+    }
+
+    ModelChecker mc = new ModelChecker(
+        mainFile, // mainFile
+        conf, // configFile,
+        null, // dumpFile,
+        false, // asDot,
+        false, // deadlock,
+        null, // fromChkpt,
+        resolver, // resolver,
+        null, // specObj,
+        fpSetConfiguration);
+
+    // AHhhhhhh GLOBaLS!!!!
+    TLCGlobals.mainChecker = mc;
+    mc.doInit(false);
+    mc.modelCheck();
+  }
+
+  private static void simulate(File cwd, String mainFile, String conf) throws Exception {
+    FPSetConfiguration fpSetConfiguration = new FPSetConfiguration(0.25d,
+      SanePathingMultiFPSet.class.getName());
+    TLCGlobals.metaDir = System.getProperty("java.io.tmpdir");
+
+    FilenameToStream resolver = getResolver(cwd, mainFile);
+
+    int len = mainFile.length();
+    if (mainFile.startsWith(".tla", len - 4)) {
+      mainFile = mainFile.substring(0, len - 4);
+    }
+    len = conf.length();
+    if (conf.startsWith(".cfg", len - 4)) {
+      conf = conf.substring(0, len - 4);
+    }
+    // random simulation
+    RandomGenerator rng = new RandomGenerator();
+    long seed = rng.nextLong();
+    rng.setSeed(seed);
+    Simulator simulator =
+      new Simulator(
+          mainFile,
+          conf,
+          null,
+          true, // check for deadlocks
+          80, // traceDepth
+          1 << 20, // traceNum
+          rng,
+          seed,
+          true,
+          resolver,
+          null // specObj
+          );
+
+    TLCGlobals.simulator = simulator;
+    simulator.simulate();
+  }
+
   public static void main(String[] args) {
     try {
       File cwd = Paths.get(".").toAbsolutePath().normalize().toFile();
-
-      FPSetConfiguration fpSetConfiguration = new FPSetConfiguration(0.25d,
-        SanePathingMultiFPSet.class.getName());
-      TLCGlobals.metaDir = System.getProperty("java.io.tmpdir");
-
-      String mainFile = args[0];
-      File root = new File(cwd, mainFile).getParentFile();
-      int len = mainFile.length();
-      if (mainFile.startsWith(".tla", len - 4)) {
-        mainFile = mainFile.substring(0, len - 4);
+      String mode = args[0];
+      String mainFile = args[1];
+      String conf = args[2];
+      FP64.Init(0);
+      //use some constant (fpIndex < 0 || fpIndex >= FP64.Polys.length)
+      if (mode.equals("check")) {
+        modelCheck(cwd, mainFile, conf);
       }
-
-      FilenameToStream resolver0 = new RelativeF2S(root, new SimpleFilenameToStream());
-      FilenameToStream resolver = new RelativeF2S(cwd, resolver0);
-      ModelChecker mc = new ModelChecker(
-          mainFile, // mainFile
-          mainFile, // configFile,
-          null, // dumpFile,
-          false, // asDot,
-          false, // deadlock,
-          null, // fromChkpt,
-          resolver, // resolver,
-          null, // specObj,
-          fpSetConfiguration);
-
-      // AHhhhhhh GLOBaLS!!!!
-      TLCGlobals.mainChecker = mc;
-      mc.modelCheck();
+      else if (mode.equals("simulate")) {
+        simulate(cwd, mainFile, conf);
+      }
+      else {
+        throw new Exception("unknown mode: " + mode);
+      }
       System.exit(0);
     }
     catch (Throwable t) {
